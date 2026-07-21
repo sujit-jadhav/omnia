@@ -61,8 +61,7 @@ files = {
     "high_availability_config": "high_availability_config.yml",
     "build_stream_config": "build_stream_config.yml",
     "gitlab_config": "gitlab_config.yml",
-    "discovery_config": "discovery_config.yml",
-    "image_build_config": "image_build_config.yml"
+    "discovery_config": "discovery_config.yml"
     # "additional_software": "additional_software.json"
 }
 
@@ -111,7 +110,6 @@ input_file_inventory = {
     ],
     # "high_availability": [files["high_availability_config"]],
     # "additional_software": [files["additional_software"]],
-    "image_build_manager": [files["image_build_config"], files["software_config"]],
     "build_stream": [files["build_stream_config"]],
     "discovery": [files["discovery_config"]],
     "gitlab": [files["gitlab_config"], files["build_stream_config"]],
@@ -234,7 +232,6 @@ def get_vault_password(yaml_file):
     """
     vault_passwords = {
         "omnia_config_credentials.yml": ".omnia_config_credentials_key",
-        "image_build_credentials.yml": ".image_build_credentials_key",
     }
     parts = yaml_file.split(os.sep)
     file = parts[-1]
