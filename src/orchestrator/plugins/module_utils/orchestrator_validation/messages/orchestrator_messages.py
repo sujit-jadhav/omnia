@@ -1010,6 +1010,22 @@ def functional_group_legacy_kernel_conflict_msg() -> str:
     )
 
 
+def functional_group_removed_boot_kernel_params_msg() -> str:
+    """Return the removed boot_kernel_params migration error message.
+
+    ER-ORCH-009 FR-6.2: boot_kernel_params has been removed from
+    orchestrator_config.yml. If supplied, fail validation before mutation
+    and direct users to functional_group_config.yml.
+    """
+    return (
+        "orchestrator_config.yml contains 'boot_kernel_params', which has been "
+        "removed (ER-ORCH-009). For flexible groups, move the value to "
+        "functional_group_config.yml under 'common' or an exact 'groups.<fg_name>' "
+        "scope. Predefined groups retain Omnia kernel-parameter defaults and do "
+        "not require a project-level override."
+    )
+
+
 def functional_group_image_override_incomplete_msg(
     group: str, missing: list[str], unknown: list[str]
 ) -> str:

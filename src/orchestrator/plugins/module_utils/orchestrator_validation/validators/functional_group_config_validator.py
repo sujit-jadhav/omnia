@@ -87,6 +87,12 @@ def _validate_legacy_inputs(
     (FR-1.2), so each legacy input conflicts only with its own field family.
     """
     legacy = orchestrator_data if isinstance(orchestrator_data, dict) else {}
+    # ER-ORCH-009 FR-6.2: boot_kernel_params removed from orchestrator_config.yml.
+    # Reject with migration guidance before any mutation.
+    if _non_empty(legacy.get("boot_kernel_params")):
+        record_error(
+            errors, logger, msg.functional_group_removed_boot_kernel_params_msg()
+        )
     legacy_cloud_init = legacy.get("additional_cloud_init_config_file", "")
     if _non_empty(legacy_cloud_init) and _any_scope(config_data, _sets_cloud_init):
         record_error(errors, logger, msg.functional_group_legacy_conflict_msg())
@@ -100,6 +106,7 @@ def _validate_scope(
     input_project_dir: str,
     errors: list[str],
     logger: Logger | None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate one ``common`` or group scope and return it as a mapping."""
     if scope is None:
@@ -111,7 +118,9 @@ def _validate_scope(
             msg.functional_group_type_msg(referenced_by, type(scope).__name__, "a mapping"),
         )
         return {}
-    validate_kernel_params(scope.get("boot_kernel_params"), referenced_by, errors, logger)
+    validate_kernel_params(
+        scope.get("boot_kernel_params"), referenced_by, errors, logger, warnings
+    )
     validate_cloud_init_reference(scope, referenced_by, input_project_dir, errors, logger)
     return scope
 
@@ -146,7 +155,7 @@ def _validate_groups(
                 msg.functional_group_architecture_required_msg(group, SUPPORTED_ARCHITECTURES),
             )
         validated = _validate_scope(
-            scope, f"groups.{group}", input_project_dir, errors, logger
+            scope, f"groups.{group}", input_project_dir, errors, logger, warnings
         )
         validate_image_override(group, validated, errors, logger)
         warn_unsupported_os(group, logger, warnings)
@@ -196,7 +205,9 @@ def validate(
         return errors
 
     _validate_legacy_inputs(config_data, orchestrator_data, errors, logger)
-    _validate_scope(config_data.get("common"), "common", input_project_dir, errors, logger)
+    _validate_scope(
+        config_data.get("common"), "common", input_project_dir, errors, logger, warnings
+    )
 
     groups = config_data.get("groups") or {}
     if not isinstance(groups, dict):

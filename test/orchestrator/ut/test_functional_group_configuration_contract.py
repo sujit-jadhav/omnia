@@ -436,21 +436,33 @@ def test_shipped_template_is_valid_and_inactive():
     assert not resolver.has_effective_configuration(template)
 
 
-def test_flexible_group_flows_are_opt_in_only():
-    """ORCH_UT_129: fg_ publication flows carry the 'never' tag.
+def test_flexible_group_dedicated_tag_is_opt_in_only():
+    """ORCH_UT_129: dedicated manage-functional-group flows carry 'never' tag.
 
-    A default full orchestrator run must not republish flexible groups.
+    The dedicated manage-functional-group tag entries must be opt-in only
+    (tagged 'never'). Lifecycle publication (default/provision/execute) does
+    NOT carry the 'never' tag — it runs automatically (HLD v13 FR-4.4).
     """
     playbook = yaml.safe_load(
         (ORCHESTRATOR_ROOT / "playbooks/orchestrator.yml").read_text(encoding="utf-8")
     )
-    flexible_tags = {"manage-functional-group", "configure-functional-groups"}
-    imports = [
+    # Dedicated manage-functional-group entries must be opt-in (never tag)
+    dedicated_imports = [
         play
         for play in playbook
-        if flexible_tags & set(play.get("tags", []))
+        if "manage-functional-group" in play.get("tags", [])
+        and "never" in play.get("tags", [])
         and "ansible.builtin.import_playbook" in play
     ]
+    # Preamble + manage playbook = 2 dedicated opt-in imports
+    assert len(dedicated_imports) == 2
 
-    assert len(imports) == 3
-    assert all("never" in play["tags"] for play in imports)
+    # Lifecycle publication entries must NOT carry the 'never' tag
+    lifecycle_imports = [
+        play
+        for play in playbook
+        if "manage_functional_group" in play.get("ansible.builtin.import_playbook", "")
+        and "never" not in play.get("tags", [])
+    ]
+    # At least one lifecycle publication import (provision/execute)
+    assert len(lifecycle_imports) >= 1

@@ -31,8 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credential file and vault key.
 - Flexible functional-group lifecycle, discovery, and log collection
   (ER-ORCH-009) with `functional_group_config.yml` per-group configuration.
-- Targeted `manage-functional-group` add/remove operation and
-  `configure-functional-groups` boot/cloud-init/both publication.
+- Single `manage-functional-group` tag for add/remove/configure operations
+  with boot/cloud-init/both publication scopes (HLD v13).
 - Kubernetes HA settings merged into `omnia_config.yml` (#5452).
 - OS version suffix enforcement in PXE functional group names
   (`<prefix>_rhel_<major>_<minor>_<arch>`) (#5484).

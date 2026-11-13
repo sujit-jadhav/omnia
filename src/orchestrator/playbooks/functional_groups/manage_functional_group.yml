@@ -15,33 +15,39 @@
 
 # manage_functional_group.yml — Bounded flexible-group lifecycle (ER-ORCH-009).
 # =============================================================================
-# Add one flexible (fg_) functional group's OpenCHAMI group, Boot Service, and
-# Metadata Service state. This flow:
+# Single entry point for all flexible (fg_) functional-group operations:
+# add, remove, and configure. This flow (HLD v13):
 #   - operates only on groups carrying the mandatory ``fg_`` prefix;
 #   - composes the shared ``provision_common`` publish pipeline, scoped to the
 #     target group(s);
 #   - never runs category provisioning playbooks or category bolt-on roles,
 #     and never consumes omnia_config.yml / storage_config.yml;
 #   - does not require repo_status.yml (FR-4.1, FR-4.3);
-#   - uses an upsert replace-node model: it does not check prior PXE identity
-#     or workload-scheduler state (FR-4.1). The operator MUST remove nodes from
-#     their existing scheduler before adding them to a flexible group.
+#   - uses an upsert replace-node model for add: it does not check prior PXE
+#     identity or workload-scheduler state (FR-4.1). The operator MUST remove
+#     nodes from their existing scheduler before adding them to a flexible group.
 #
-# Remove (FR-4.2) is delivered by the ER-ORCH-009-lifecycle-mutation-safety
-# story, which owns the member-safe, ownership-scoped, common-group-preserving
-# deletion reconciliation (openchami_reconcile delete_groups /
-# prune_boot_configurations / prune_metadata_groups) in the
-# orchestrator_functional_groups role. Invoking fg_operation=remove here fails
-# fast rather than running a partial deletion.
+# Operations (FR-4.1, FR-4.2, FR-4.3):
+#   add       — Create or reconcile OpenCHAMI group, BSS, and metadata state.
+#   remove    — Remove owned records after verifying no mapped nodes remain.
+#               (Delivered by ER-ORCH-009-lifecycle-mutation-safety story.)
+#   configure — Publish BSS and/or metadata configuration only, without group
+#               creation, node registration, bolt-on roles, or scheduler effects.
 #
 # Usage (imported by orchestrator.yml under --tags manage-functional-group):
+#   # Add a group:
 #   ansible-playbook playbooks/orchestrator.yml --tags manage-functional-group \
 #     -e fg_operation=add -e fg_target_group=fg_webserver_rhel_10_2_x86_64
+#   # Configure boot parameters only:
+#   ansible-playbook playbooks/orchestrator.yml --tags manage-functional-group \
+#     -e fg_operation=configure -e configure_scope=boot \
+#     -e fg_target_group=fg_webserver_rhel_10_2_x86_64
 #
 # Variables:
-#   fg_operation    add (default). remove is not yet available here.
-#   fg_target_group optional exact fg_ name; when unset, every fg_ group in the
-#                   active mapping is targeted.
+#   fg_operation     add (default) | remove | configure
+#   configure_scope  both (default) | boot | cloud_init  (only for configure)
+#   fg_target_group  optional exact fg_ name; when unset, every fg_ group in the
+#                    active mapping is targeted.
 #
 # Prerequisites: provision_preamble.yml runs first (imported for this tag in
 # orchestrator.yml).
@@ -53,6 +59,13 @@
   vars:
     target_category: flexible
     fg_operation: add
+    configure_scope: both
+    # Scope gates consumed by provision_common for configure operations;
+    # default to publishing both when a caller does not restrict the scope.
+    fg_publish_boot: "{{ configure_scope in ['both', 'boot'] }}"
+    fg_publish_cloud_init: "{{ configure_scope in ['both', 'cloud_init'] }}"
+    # Configure operations skip node registration (publish-only mode).
+    provision_common_registration_complete: "{{ fg_operation == 'configure' }}"
   pre_tasks:
     - name: Load orchestrator state
       ansible.builtin.include_vars:
@@ -69,10 +82,19 @@
     - name: Validate requested lifecycle operation
       ansible.builtin.assert:
         that:
-          - fg_operation in ['add', 'remove']
+          - fg_operation in ['add', 'remove', 'configure']
         fail_msg: >-
           Unsupported fg_operation '{{ fg_operation }}'. Supported operations
-          are 'add' and 'remove'.
+          are 'add', 'remove', and 'configure'.
+
+    - name: Validate requested configuration scope
+      ansible.builtin.assert:
+        that:
+          - configure_scope in ['both', 'boot', 'cloud_init']
+        fail_msg: >-
+          Unsupported configure_scope '{{ configure_scope }}'. Supported scopes
+          are 'both', 'boot', and 'cloud_init'.
+      when: fg_operation == 'configure'
 
     - name: Fail fast for the not-yet-available remove operation
       ansible.builtin.fail:
@@ -80,7 +102,7 @@
           fg_operation=remove is delivered by the ER-ORCH-009
           lifecycle-mutation-safety story and is not available in this flow yet.
           Member-safe, ownership-scoped deletion is intentionally not run here to
-          avoid partial removal. Use fg_operation=add for now.
+          avoid partial removal. Use fg_operation=add or fg_operation=configure.
       when: fg_operation == 'remove'
 
     - name: Select flexible functional groups
@@ -109,14 +131,19 @@
       ansible.builtin.debug:
         msg: >-
           fg_operation={{ fg_operation }};
-          targets={{ target_functional_groups | map(attribute='name') | list }}
+          {{ 'configure_scope=' + configure_scope + '; '
+             if fg_operation == 'configure' else '' }}targets={{ target_functional_groups | map(attribute='name') | list }}
 
   roles:
     # Add: publish OpenCHAMI group, Boot Service, and Metadata Service state
     # through the shared generic pipeline (no bolt-ons for the flexible
     # category). The replace-node model is inherent to register_nodes'
     # upsert-style discover_static reconciliation.
+    #
+    # Configure: publish BSS and/or metadata configuration only, without
+    # group creation, node registration, bolt-on roles, or scheduler effects.
+    # The provision_common_registration_complete flag skips node registration.
     - role: provision_common
       when:
-        - fg_operation == 'add'
+        - fg_operation in ['add', 'configure']
         - target_functional_groups | length > 0

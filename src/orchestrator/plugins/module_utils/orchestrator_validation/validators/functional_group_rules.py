@@ -111,9 +111,18 @@ def validate_architecture_reference(
 
 
 def validate_kernel_params(
-    raw: Any, referenced_by: str, errors: list[str], logger: Logger | None
+    raw: Any,
+    referenced_by: str,
+    errors: list[str],
+    logger: Logger | None,
+    warnings: list[str] | None = None,
 ) -> None:
-    """Validate one ``boot_kernel_params`` string."""
+    """Validate one ``boot_kernel_params`` string.
+
+    Per HLD v13 (ER-ORCH-009 FR-2.1): control characters, quotes,
+    backslashes, or protected/unsafe parameters produce advisory warnings
+    only — they do NOT block BSS publication.  Type errors remain blocking.
+    """
     if raw is None:
         return
     if not isinstance(raw, str):
@@ -126,26 +135,26 @@ def validate_kernel_params(
         )
         return
     if _UNSAFE_KERNEL_CHARS.search(raw):
-        record_error(
-            errors,
+        record_warning(
             logger,
             msg.functional_group_kernel_param_format_msg(referenced_by, raw.strip()),
+            warnings,
         )
         return
     for token in raw.split():
         if not KERNEL_PARAM_PATTERN.match(token):
-            record_error(
-                errors,
+            record_warning(
                 logger,
                 msg.functional_group_kernel_param_format_msg(referenced_by, token),
+                warnings,
             )
             continue
         key = token.split("=", 1)[0]
         if key in PROTECTED_KERNEL_PARAMS:
-            record_error(
-                errors,
+            record_warning(
                 logger,
                 msg.functional_group_protected_param_msg(referenced_by, key),
+                warnings,
             )
 
 
