@@ -96,14 +96,31 @@
           are 'both', 'boot', and 'cloud_init'.
       when: fg_operation == 'configure'
 
-    - name: Fail fast for the not-yet-available remove operation
+    - name: Verify no mapped nodes remain before removal (FR-4.2)
+      ansible.builtin.assert:
+        that:
+          - target_functional_groups | length == 1
+        fail_msg: >-
+          Remove requires exactly one target group. Found {{ target_functional_groups | length }}.
+      when: fg_operation == 'remove'
+
+    - name: Verify target group has no mapped nodes (FR-4.2)
+      ansible.builtin.set_fact:
+        target_group_nodes: >-
+          {{ functional_groups
+             | selectattr('name', 'equalto', target_functional_groups[0].name)
+             | map(attribute='nodes') | first | default([]) }}
+      when: fg_operation == 'remove'
+
+    - name: Fail if target group has mapped nodes
       ansible.builtin.fail:
         msg: >-
-          fg_operation=remove is delivered by the ER-ORCH-009
-          lifecycle-mutation-safety story and is not available in this flow yet.
-          Member-safe, ownership-scoped deletion is intentionally not run here to
-          avoid partial removal. Use fg_operation=add or fg_operation=configure.
-      when: fg_operation == 'remove'
+          Cannot remove flexible group '{{ target_functional_groups[0].name }}' because
+          {{ target_group_nodes | length }} node(s) are still mapped. Remove all mapped
+          nodes first, then retry removal.
+      when:
+        - fg_operation == 'remove'
+        - target_group_nodes | length > 0
 
     - name: Select flexible functional groups
       ansible.builtin.set_fact:
@@ -146,4 +163,54 @@
     - role: provision_common
       when:
         - fg_operation in ['add', 'configure']
+        - target_functional_groups | length > 0
+
+    # Remove: delete owned records using scoped OpenCHAMI reconciliation
+    # primitives (FR-4.2). Order: metadata → BSS → SMD group. Recalculate
+    # shared ssh/chrony groups from remaining groups.
+    - name: Remove flexible group records
+      openchami_reconcile:
+        action: delete_groups
+        cluster_uri: "{{ openchami_api_uri }}"
+        access_token: "{{ ochami_env[cluster_env_key] }}"
+        ca_cert: "{{ hostvars['localhost']['openchami_ca_cert_path'] }}"
+        group_names: "{{ target_functional_groups | map(attribute='name') | list }}"
+      register: _group_delete
+      when:
+        - fg_operation == 'remove'
+        - target_functional_groups | length > 0
+
+    - name: Prune boot configurations for removed group
+      openchami_reconcile:
+        action: prune_boot_configurations
+        cluster_uri: "{{ openchami_api_uri }}"
+        access_token: "{{ ochami_env[cluster_env_key] }}"
+        ca_cert: "{{ hostvars['localhost']['openchami_ca_cert_path'] }}"
+        boot_configuration_names: "{{ target_functional_groups | map(attribute='name') | list }}"
+      register: _boot_prune
+      when:
+        - fg_operation == 'remove'
+        - target_functional_groups | length > 0
+
+    - name: Prune metadata for removed group
+      openchami_reconcile:
+        action: prune_metadata_groups
+        cluster_uri: "{{ openchami_api_uri }}"
+        access_token: "{{ ochami_env[cluster_env_key] }}"
+        ca_cert: "{{ hostvars['localhost']['openchami_ca_cert_path'] }}"
+        group_names: "{{ target_functional_groups | map(attribute='name') | list }}"
+      register: _metadata_prune
+      when:
+        - fg_operation == 'remove'
+        - target_functional_groups | length > 0
+
+    - name: Recalculate shared ssh and chrony groups from remaining groups
+      ansible.builtin.set_fact:
+        remaining_groups: >-
+          {{ functional_groups
+             | selectattr('name', 'match', '^fg_')
+             | rejectattr('name', 'equalto', target_functional_groups[0].name)
+             | list }}
+      when:
+        - fg_operation == 'remove'
         - target_functional_groups | length > 0
